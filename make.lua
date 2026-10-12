@@ -137,9 +137,22 @@ lm:import "clibs/sample/make.lua"
 lm:exe "soluna" {
 	deps = deps,
 	emcc = {
+		-- `websocket` turns into -lwebsocket, which link.py maps to libwebsocket.js
+		-- (tools/link.py, map_to_js_libs). 3rd/httpcli/ws_proto_wasm.c calls
+		-- emscripten_websocket_* directly, so those are real references from wasm
+		-- code and the library stays linked on its own.
+		-- `fetch` is the same story for HTTP: libfetch.js for the JS side plus
+		-- libfetch.a (system/lib/fetch/emscripten_fetch.c) for the C entry points.
+		-- Both are needed by the module itself (it is compiled into this exe), not
+		-- by any side module.
+		links = {
+			"websocket",
+			"fetch",
+		},
 		ldflags = {
 			"--js-library=src/platform/wasm/soluna_ime.js",
 			"--js-library=src/platform/wasm/soluna_openurl.js",
+			"--js-library=src/platform/wasm/soluna_http.js",
 			"-s MODULARIZE=1",
 			"-s EXPORT_ES6=1",
 			"-s EXPORT_NAME=createApp",
@@ -150,6 +163,15 @@ lm:exe "soluna" {
 			"-s MAIN_MODULE=2",
 			"-Wl,-u,emscripten_builtin_memalign",
 			"-Wl,--export=emscripten_builtin_memalign",
+			-- emscripten_fetch 得导出，是因为引擎自己的 JS 库要调它：soluna_http.js 的
+			-- soluna_http_start 从 JS 侧调 `_emscripten_fetch(...)`，而 JS 调 wasm 得走
+			-- 导出表。`-u` 也要留：C 侧没人调它，不钉住会被当成死代码丢掉。
+			"-Wl,-u,emscripten_fetch", "-Wl,--export=emscripten_fetch",
+			-- 这里以前还有另外 4 个 emscripten_fetch_* 和 6 个 musl 函数
+			-- （snprintf / strcmp / strncmp / memchr / strlen / clock_gettime）
+			-- 的 `-u` + `--export` 钉子，那是给 side module 解析导入用的。
+			-- 现在另外 4 个 fetch 符号是 httpcli 里的 C 代码直接调的（有真实引用，
+			-- 不用钉），那 6 个 musl 函数谁都不调，所以整块删掉。
 		},
 	},
 }

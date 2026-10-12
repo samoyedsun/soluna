@@ -28,3 +28,6 @@
 [submodule "bin/luamake-bin"]
 	path = bin/luamake-bin
 	url = https://github.com/yuchanns/luamake-bin.git
+[submodule "3rd/httpcli"]
+	path = 3rd/httpcli
+	url = https://github.com/samoyedsun/httpcli.git
