@@ -137,9 +137,24 @@ lm:import "clibs/sample/make.lua"
 lm:exe "soluna" {
 	deps = deps,
 	emcc = {
+		-- `websocket` turns into -lwebsocket, which link.py maps to libwebsocket.js
+		-- (tools/link.py, map_to_js_libs). The wasm extension modules load their
+		-- WebSocket through it, so it has to be in the main module.
+		-- `fetch` is the same story for HTTP: libfetch.js for the JS side plus
+		-- libfetch.a (system/lib/fetch/emscripten_fetch.c) for the C entry points.
+		links = {
+			"websocket",
+			"fetch",
+		},
+		sources = {
+			-- Nothing here is called; they only pin the libraries against tree-shaking.
+			"src/platform/wasm/soluna_force_link_websocket.c",
+			"src/platform/wasm/soluna_force_link_fetch.c",
+		},
 		ldflags = {
 			"--js-library=src/platform/wasm/soluna_ime.js",
 			"--js-library=src/platform/wasm/soluna_openurl.js",
+			"--js-library=src/platform/wasm/soluna_http.js",
 			"-s MODULARIZE=1",
 			"-s EXPORT_ES6=1",
 			"-s EXPORT_NAME=createApp",
@@ -150,6 +165,27 @@ lm:exe "soluna" {
 			"-s MAIN_MODULE=2",
 			"-Wl,-u,emscripten_builtin_memalign",
 			"-Wl,--export=emscripten_builtin_memalign",
+			-- Side modules resolve every import out of the main module's export
+			-- table (libdylink.js: `prop in wasmImports` first, else
+			-- moduleExports). These are musl functions the wasm-side extension
+			-- modules call; wasm-ld leaves them out of that table unless asked,
+			-- and the dylink stub then throws "resolved is not a function" the
+			-- first time the side module reaches one. `-u` pins them against
+			-- GC (a main module that never calls snprintf would otherwise drop
+			-- it), `--export` puts them in the table.
+			"-Wl,-u,snprintf", "-Wl,--export=snprintf",
+			"-Wl,-u,strcmp", "-Wl,--export=strcmp",
+			"-Wl,-u,strncmp", "-Wl,--export=strncmp",
+			"-Wl,-u,memchr", "-Wl,--export=memchr",
+			"-Wl,-u,strlen", "-Wl,--export=strlen",
+			"-Wl,-u,clock_gettime", "-Wl,--export=clock_gettime",
+			-- Same reason, for the HTTP half of ext.network: these resolve out of
+			-- the main module from the side module.
+			"-Wl,-u,emscripten_fetch", "-Wl,--export=emscripten_fetch",
+			"-Wl,-u,emscripten_fetch_attr_init", "-Wl,--export=emscripten_fetch_attr_init",
+			"-Wl,-u,emscripten_fetch_close", "-Wl,--export=emscripten_fetch_close",
+			"-Wl,-u,emscripten_fetch_get_response_headers_length", "-Wl,--export=emscripten_fetch_get_response_headers_length",
+			"-Wl,-u,emscripten_fetch_get_response_headers", "-Wl,--export=emscripten_fetch_get_response_headers",
 		},
 	},
 }
